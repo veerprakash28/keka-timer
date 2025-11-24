@@ -2,22 +2,38 @@ import rumps
 import threading
 import time
 import logging
+import subprocess
 from datetime import datetime, timedelta
 from utils import calculate_remaining_time
 
+def send_notification(title, subtitle, message):
+    """Sends a native macOS notification using AppleScript."""
+    try:
+        script = f'display notification "{message}" with title "{title}" subtitle "{subtitle}"'
+        subprocess.run(["osascript", "-e", script])
+    except Exception as e:
+        logging.error(f"Failed to send notification: {e}")
+
 class KekaTimerApp(rumps.App):
     def __init__(self, scraper):
-        super(KekaTimerApp, self).__init__("Keka: Loading...")
+        super(KekaTimerApp, self).__init__("Keka: Loading...", quit_button=None)
         self.scraper = scraper
         self.clock_in_time = None
         self.work_hours = 9
         
         # Menu Items
+        self.clock_in_button = rumps.MenuItem("Clock In", callback=self.clock_in)
+        self.clock_out_button = rumps.MenuItem("Clock Out", callback=self.clock_out)
         self.refresh_button = rumps.MenuItem("Refresh", callback=self.refresh_data)
+        self.exit_button = rumps.MenuItem("Quit", callback=self.quit_app)
+        
         self.menu = [
+            self.clock_in_button,
+            self.clock_out_button,
+            rumps.separator,
             self.refresh_button,
             rumps.separator,
-            # "Quit" is added automatically by rumps
+            self.exit_button
         ]
         
         # Start timer
@@ -36,6 +52,34 @@ class KekaTimerApp(rumps.App):
         else:
             logging.info("Initial fetch: Not clocked in or failed.")
 
+    def clock_in(self, _):
+        logging.info("Manual Clock In triggered.")
+        self.title = "Keka: Clocking In..."
+        threading.Thread(target=self.do_clock_in, daemon=True).start()
+
+    def do_clock_in(self):
+        success = self.scraper.perform_clock_in()
+        if success:
+            send_notification("Keka Timer", "Clock In", "Clock In attempt finished. Refreshing...")
+            self.do_refresh()
+        else:
+            send_notification("Keka Timer", "Clock In Failed", "Could not find button or error occurred.")
+            self.title = "Keka: Error"
+
+    def clock_out(self, _):
+        logging.info("Manual Clock Out triggered.")
+        self.title = "Keka: Clocking Out..."
+        threading.Thread(target=self.do_clock_out, daemon=True).start()
+
+    def do_clock_out(self):
+        success = self.scraper.perform_clock_out()
+        if success:
+            send_notification("Keka Timer", "Clock Out", "Clock Out attempt finished. Refreshing...")
+            self.do_refresh()
+        else:
+            send_notification("Keka Timer", "Clock Out Failed", "Could not find button or error occurred.")
+            self.title = "Keka: Error"
+
     def refresh_data(self, _):
         logging.info("Manual refresh triggered.")
         self.title = "Keka: Refreshing..."
@@ -53,6 +97,13 @@ class KekaTimerApp(rumps.App):
             # For now, let's keep the old time if refresh fails, or set to None if we confirm logout.
             # Scraper returns None if not found.
             self.clock_in_time = None
+
+    def quit_app(self, _):
+        logging.info("Quitting app and closing browser...")
+        if self.scraper:
+            self.scraper.perform_logout()
+            self.scraper.close_browser()
+        rumps.quit_application()
 
     def update_timer(self, _):
         if self.clock_in_time:

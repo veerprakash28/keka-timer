@@ -63,55 +63,204 @@ class KekaScraper:
 
     def get_clock_in_time(self):
         """
-        Scrapes the clock-in time from the dashboard.
+        Scrapes the clock-in time from the logs page by parsing 'Since Last Login'.
         Returns a datetime object or None if not found/not clocked in.
         """
         import logging
+        import re
+        from datetime import datetime, timedelta
+        
         try:
-            # Navigate to logs for reliable data
-            # self.driver.get(f"{self.url}/#/time/attendance/logs") 
-            # NOTE: Navigating changes the page, which might confuse the user if they are looking at it.
-            # But we minimized it.
-            # Let's check if we are already on logs or dashboard.
+            logging.info("Scraping clock-in time from logs page...")
             
-            logging.info("Scraping clock-in time...")
+            # Navigate to logs page (where "Since Last Login" text is located)
+            self.driver.get(f"{self.url}/#/me/attendance/logs")
+            time.sleep(3)
             
-            # Use a less intrusive check if possible, or just go to logs.
-            # Going to logs is safest for data.
-            if "logs" not in self.driver.current_url:
-                self.driver.get(f"{self.url}/#/time/attendance/logs")
-                time.sleep(2)
-            
-            # Wait for the table to load
+            # Wait for page to load
             WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "table"))
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
             )
             time.sleep(1)
-
+            
+            # Get page text
             body_text = self.driver.find_element(By.TAG_NAME, "body").text
+            logging.info("Searching for 'Since Last Login' text...")
             
-            from utils import find_clock_in_time_in_text
-            clock_in_time = find_clock_in_time_in_text(body_text)
+            # Look for pattern: "0h:1m Since Last Login" or "1h:30m Since Last Login"
+            # Pattern matches: Xh:Ym or Xh Ym or X hours Y minutes, etc.
+            patterns = [
+                r'(\d+)h[:\s]*(\d+)m\s*Since Last Login',
+                r'(\d+)\s*h[:\s]*(\d+)\s*m\s*Since Last Login',
+                r'(\d+)\s*hours?\s*(\d+)\s*min',
+            ]
             
-            if clock_in_time:
-                logging.info(f"Found clock-in time: {clock_in_time}")
-                return clock_in_time
-            else:
-                logging.info("Could not find clock-in time in logs.")
-                # Fallback: Check Dashboard "Actions" card
-                self.driver.get(f"{self.url}/#/home/dashboard")
-                time.sleep(3)
-                body_text = self.driver.find_element(By.TAG_NAME, "body").text
-                clock_in_time = find_clock_in_time_in_text(body_text)
-                if clock_in_time:
-                    logging.info(f"Found clock-in time on dashboard: {clock_in_time}")
+            for pattern in patterns:
+                match = re.search(pattern, body_text, re.IGNORECASE)
+                if match:
+                    hours = int(match.group(1))
+                    minutes = int(match.group(2))
+                    logging.info(f"Found 'Since Last Login': {hours}h:{minutes}m")
+                    
+                    # Calculate clock-in time by subtracting from current time
+                    now = datetime.now()
+                    clock_in_time = now - timedelta(hours=hours, minutes=minutes)
+                    
+                    logging.info(f"Calculated clock-in time: {clock_in_time}")
                     return clock_in_time
-                
-                return None
+            
+            # If no "Since Last Login" found, user is not clocked in
+            logging.info("No 'Since Last Login' text found. User may not be clocked in.")
+            return None
 
         except Exception as e:
             logging.error(f"Error scraping clock-in time: {e}")
             return None
+
+
+    def perform_clock_in(self):
+        """Attempts to clock in from dashboard."""
+        import logging
+        try:
+            logging.info("Attempting to Clock In...")
+            self.driver.get(f"{self.url}/#/home/dashboard")
+            time.sleep(3)
+            
+            # Look for "Web Clock-in" button in Actions section
+            # Use case-insensitive matching since button text might be "Web Clock-In" or "Web Clock-in"
+            buttons = self.driver.find_elements(By.XPATH, 
+                "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'web clock-in') or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'clock-in')]")
+            if buttons:
+                buttons[0].click()
+                logging.info("Clicked 'Web Clock-in' button.")
+                time.sleep(2)
+                
+                # Handle potential confirmation dialog
+                confirm_buttons = self.driver.find_elements(By.XPATH, "//button[contains(., 'Confirm') or contains(., 'Clock In')]")
+                if confirm_buttons:
+                    visible_buttons = [b for b in confirm_buttons if b.is_displayed()]
+                    if visible_buttons:
+                        visible_buttons[0].click()
+                        logging.info("Clicked confirmation button.")
+                        time.sleep(2)
+                
+                logging.info("Clock-in completed.")
+                return True
+            else:
+                logging.warning("Could not find 'Web Clock-in' button.")
+                return False
+        except Exception as e:
+            logging.error(f"Error during Clock In: {e}")
+            return False
+
+
+    def perform_clock_out(self):
+        """Attempts to clock out with two-step confirmation."""
+        import logging
+        try:
+            logging.info("Attempting to Clock Out...")
+            self.driver.get(f"{self.url}/#/home/dashboard")
+            time.sleep(3)
+            
+            # Look for "Clock-out" button (could be on dashboard or logs page)
+            # Use case-insensitive matching
+            buttons = self.driver.find_elements(By.XPATH, 
+                "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'clock-out') or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'web clock-out')]")
+            if buttons:
+                # First click - shows hours logged
+                buttons[0].click()
+                logging.info("Clicked 'Clock-out' button (first click - showing hours).")
+                time.sleep(2)
+                
+                # Second click - confirm clock-out
+                # Look for confirmation button in modal/dialog
+                # Could be "Clock Out", "Confirm", "Yes", or similar
+                confirm_buttons = self.driver.find_elements(By.XPATH, 
+                    "//button[contains(., 'Clock Out') or contains(., 'Clock-out') or contains(., 'Confirm') or contains(., 'Yes')]")
+                
+                if confirm_buttons:
+                    # Filter for visible buttons (modal buttons)
+                    visible_buttons = [b for b in confirm_buttons if b.is_displayed()]
+                    if visible_buttons:
+                        # Click the confirmation button
+                        visible_buttons[0].click()
+                        logging.info("Clicked confirmation button (second click - confirming clock-out).")
+                        time.sleep(3)
+                        
+                        # Verify clock-out by checking if button changed or disappeared
+                        # After clock-out, the "Clock-out" button should disappear or change to "Clock-in"
+                        clock_in_buttons = self.driver.find_elements(By.XPATH, "//button[contains(., 'Clock-in') or contains(., 'Web Clock-in')]")
+                        if clock_in_buttons:
+                            logging.info("Clock-out confirmed - Clock-in button now visible.")
+                            return True
+                        else:
+                            logging.warning("Clock-out button clicked but could not confirm.")
+                            return True  # Still return True since we clicked
+                    else:
+                        logging.warning("No visible confirmation button found after first click.")
+                        return False
+                else:
+                    logging.warning("No confirmation button found after first click. Clock-out might have failed.")
+                    return False
+            else:
+                logging.warning("Could not find 'Clock-out' button. User may not be clocked in.")
+                return False
+        except Exception as e:
+            logging.error(f"Error during Clock Out: {e}")
+            return False
+
+
+    def perform_logout(self):
+        """Attempts to log out."""
+        import logging
+        try:
+            logging.info("Attempting to Log Out...")
+            if not self.driver:
+                return
+
+            # 1. Try to find and click Logout button directly
+            try:
+                logout_btns = self.driver.find_elements(By.XPATH, "//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log out')] | //button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'log out')]")
+                if logout_btns:
+                    for btn in logout_btns:
+                        if btn.is_displayed():
+                            btn.click()
+                            logging.info("Clicked Logout button.")
+                            time.sleep(2)
+                            return
+            except Exception:
+                pass
+
+            # 2. Try to click User Profile then Logout
+            try:
+                # Common selectors for profile dropdown
+                profile_selectors = [
+                    "//div[contains(@class, 'profile')]",
+                    "//img[contains(@class, 'avatar')]",
+                    "//div[contains(@class, 'user')]"
+                ]
+                for selector in profile_selectors:
+                    profiles = self.driver.find_elements(By.XPATH, selector)
+                    for profile in profiles:
+                        if profile.is_displayed():
+                            profile.click()
+                            time.sleep(1)
+                            # Look for logout in dropdown
+                            logout_dropdown = self.driver.find_elements(By.XPATH, "//a[contains(., 'Log out')] | //li[contains(., 'Log out')]")
+                            if logout_dropdown:
+                                logout_dropdown[0].click()
+                                logging.info("Clicked Logout in dropdown.")
+                                time.sleep(2)
+                                return
+            except Exception:
+                pass
+
+            # 3. Fallback: Delete all cookies
+            logging.info("Could not find Logout button, deleting cookies to ensure logout.")
+            self.driver.delete_all_cookies()
+            
+        except Exception as e:
+            logging.error(f"Error during Logout: {e}")
 
     def minimize_window(self):
         """Minimizes the browser window."""
