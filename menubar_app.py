@@ -20,6 +20,8 @@ class KekaTimerApp(rumps.App):
         self.scraper = scraper
         self.clock_in_time = None
         self.work_hours = 9
+        self.notification_shown = False
+        self.snooze_until = None
         
         # Menu Items
         self.clock_in_button = rumps.MenuItem("Clock In", callback=self.clock_in)
@@ -118,13 +120,58 @@ class KekaTimerApp(rumps.App):
                 time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
                 self.title = f"Keka: {time_str}"
             else:
-                # Overtime
+                # Overtime - check if we should show notification
+                if not self.notification_shown:
+                    # Check if snooze period has passed
+                    if self.snooze_until is None or datetime.now() >= self.snooze_until:
+                        threading.Thread(target=self.show_completion_dialog, daemon=True).start()
+                        self.notification_shown = True
+                
                 overtime = abs(remaining)
                 total_seconds = int(overtime.total_seconds())
                 hours = total_seconds // 3600
                 minutes = (total_seconds % 3600) // 60
                 seconds = total_seconds % 60
                 time_str = f"+ {hours:02}:{minutes:02}:{seconds:02}"
-                self.title = f"Keka: {time_str}" # Maybe add color or icon if possible? Rumps is limited.
+                self.title = f"Keka: {time_str}"
         else:
             self.title = "Keka: Not Clocked In"
+
+    def show_completion_dialog(self):
+        """Shows a dialog when 9 hours are completed."""
+        try:
+            script = '''
+            display dialog "You've completed 9 hours! Time to clock out?" ¬
+            buttons {"Snooze (15 min)", "Dismiss", "Clock Out"} ¬
+            default button "Clock Out" ¬
+            with title "Keka Timer" ¬
+            with icon caution
+            '''
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            
+            # Parse the button clicked
+            if result.returncode == 0:
+                button_clicked = result.stdout.strip()
+                logging.info(f"Completion dialog: User clicked '{button_clicked}'")
+                
+                if "Clock Out" in button_clicked:
+                    # Trigger clock out
+                    logging.info("User chose to clock out from completion dialog")
+                    self.do_clock_out()
+                elif "Snooze" in button_clicked:
+                    # Snooze for 15 minutes
+                    self.snooze_until = datetime.now() + timedelta(minutes=15)
+                    self.notification_shown = False
+                    logging.info(f"Snoozed until {self.snooze_until}")
+                    send_notification("Keka Timer", "Snoozed", "Reminder snoozed for 15 minutes")
+                elif "Dismiss" in button_clicked:
+                    # Dismissed - don't show again
+                    logging.info("User dismissed completion notification")
+                    # notification_shown remains True
+            else:
+                # User cancelled dialog
+                logging.info("User cancelled completion dialog")
+                self.notification_shown = False
+        except Exception as e:
+            logging.error(f"Error showing completion dialog: {e}")
+            self.notification_shown = False

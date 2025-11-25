@@ -30,8 +30,9 @@ def main():
         logging.info("Login successful!")
         print("Login successful!")
         
-        # Minimize browser so user sees the app
-        scraper.minimize_window()
+        
+        # Don't minimize browser - keep it visible for user
+        # scraper.minimize_window()
         
         # Launch Menu Bar App
         logging.info("Launching Menu Bar App...")

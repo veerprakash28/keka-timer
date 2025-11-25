@@ -61,6 +61,19 @@ class KekaScraper:
         logging.error("Login timeout.")
         return False
 
+    def ensure_session_alive(self):
+        """Check if browser session is still valid."""
+        try:
+            current_url = self.driver.current_url
+            # If we're on login page, session expired
+            if "login" in current_url.lower() or current_url == "data:,":
+                logging.warning("Session appears to have expired")
+                return False
+            return True
+        except Exception as e:
+            logging.error(f"Error checking session: {e}")
+            return False
+
     def get_clock_in_time(self):
         """
         Scrapes the clock-in time from the logs page by parsing 'Since Last Login'.
@@ -70,52 +83,69 @@ class KekaScraper:
         import re
         from datetime import datetime, timedelta
         
-        try:
-            logging.info("Scraping clock-in time from logs page...")
-            
-            # Navigate to logs page (where "Since Last Login" text is located)
-            self.driver.get(f"{self.url}/#/me/attendance/logs")
-            time.sleep(3)
-            
-            # Wait for page to load
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            time.sleep(1)
-            
-            # Get page text
-            body_text = self.driver.find_element(By.TAG_NAME, "body").text
-            logging.info("Searching for 'Since Last Login' text...")
-            
-            # Look for pattern: "0h:1m Since Last Login" or "1h:30m Since Last Login"
-            # Pattern matches: Xh:Ym or Xh Ym or X hours Y minutes, etc.
-            patterns = [
-                r'(\d+)h[:\s]*(\d+)m\s*Since Last Login',
-                r'(\d+)\s*h[:\s]*(\d+)\s*m\s*Since Last Login',
-                r'(\d+)\s*hours?\s*(\d+)\s*min',
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, body_text, re.IGNORECASE)
-                if match:
-                    hours = int(match.group(1))
-                    minutes = int(match.group(2))
-                    logging.info(f"Found 'Since Last Login': {hours}h:{minutes}m")
-                    
-                    # Calculate clock-in time by subtracting from current time
-                    now = datetime.now()
-                    clock_in_time = now - timedelta(hours=hours, minutes=minutes)
-                    
-                    logging.info(f"Calculated clock-in time: {clock_in_time}")
-                    return clock_in_time
-            
-            # If no "Since Last Login" found, user is not clocked in
-            logging.info("No 'Since Last Login' text found. User may not be clocked in.")
-            return None
+        # Retry once if first attempt fails
+        for attempt in range(2):
+            try:
+                if attempt > 0:
+                    logging.info("Retrying clock-in time scrape...")
+                    time.sleep(2)
+                
+                logging.info("Scraping clock-in time from logs page...")
+                
+                # Check session before scraping
+                if not self.ensure_session_alive():
+                    logging.warning("Session not alive, attempting to refresh...")
+                    # Try to navigate to dashboard to refresh session
+                    self.driver.get(f"{self.url}/#/home/dashboard")
+                    time.sleep(2)
+                
+                # Navigate to logs page (where "Since Last Login" text is located)
+                self.driver.get(f"{self.url}/#/me/attendance/logs")
+                time.sleep(3)
+                
+                # Wait for page to load
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                time.sleep(1)
+                
+                # Get page text
+                body_text = self.driver.find_element(By.TAG_NAME, "body").text
+                logging.info("Searching for 'Since Last Login' text...")
+                
+                # Look for pattern: "0h:1m Since Last Login" or "1h:30m Since Last Login"
+                # Pattern matches: Xh:Ym or Xh Ym or X hours Y minutes, etc.
+                patterns = [
+                    r'(\d+)h[:\s]*(\d+)m\s*Since Last Login',
+                    r'(\d+)\s*h[:\s]*(\d+)\s*m\s*Since Last Login',
+                    r'(\d+)\s*hours?\s*(\d+)\s*min',
+                ]
+                
+                for pattern in patterns:
+                    match = re.search(pattern, body_text, re.IGNORECASE)
+                    if match:
+                        hours = int(match.group(1))
+                        minutes = int(match.group(2))
+                        logging.info(f"Found 'Since Last Login': {hours}h:{minutes}m")
+                        
+                        # Calculate clock-in time by subtracting from current time
+                        now = datetime.now()
+                        clock_in_time = now - timedelta(hours=hours, minutes=minutes)
+                        
+                        logging.info(f"Calculated clock-in time: {clock_in_time}")
+                        return clock_in_time
+                
+                # If no "Since Last Login" found, user is not clocked in
+                logging.info("No 'Since Last Login' text found. User may not be clocked in.")
+                return None
 
-        except Exception as e:
-            logging.error(f"Error scraping clock-in time: {e}")
-            return None
+            except Exception as e:
+                logging.error(f"Error scraping clock-in time (attempt {attempt + 1}): {e}")
+                if attempt == 1:  # Last attempt
+                    return None
+                # Continue to retry
+        
+        return None
 
 
     def perform_clock_in(self):
@@ -123,8 +153,20 @@ class KekaScraper:
         import logging
         try:
             logging.info("Attempting to Clock In...")
+            
+            # Force page refresh to ensure fresh DOM
+            logging.info("Refreshing page to ensure fresh session...")
             self.driver.get(f"{self.url}/#/home/dashboard")
             time.sleep(3)
+            
+            # Refresh again to ensure page is fully loaded
+            self.driver.refresh()
+            time.sleep(2)
+            
+            # Wait for page to be interactive
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
             
             # Look for "Web Clock-in" button in Actions section
             # Use case-insensitive matching since button text might be "Web Clock-In" or "Web Clock-in"
@@ -159,8 +201,20 @@ class KekaScraper:
         import logging
         try:
             logging.info("Attempting to Clock Out...")
+            
+            # Force page refresh to ensure fresh DOM
+            logging.info("Refreshing page to ensure fresh session...")
             self.driver.get(f"{self.url}/#/home/dashboard")
             time.sleep(3)
+            
+            # Refresh again to ensure page is fully loaded
+            self.driver.refresh()
+            time.sleep(2)
+            
+            # Wait for page to be interactive
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
             
             # Look for "Clock-out" button (could be on dashboard or logs page)
             # Use case-insensitive matching
