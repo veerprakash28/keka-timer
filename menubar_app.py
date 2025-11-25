@@ -60,12 +60,19 @@ class KekaTimerApp(rumps.App):
         threading.Thread(target=self.do_clock_in, daemon=True).start()
 
     def do_clock_in(self):
+        # Check if session is valid
+        if not self.scraper.is_session_valid():
+            logging.warning("Session invalid, prompting user to relaunch")
+            send_notification("Keka Timer", "Session Expired", "Browser session expired. Please restart the app.")
+            self.title = "Keka: Session Expired"
+            return
+        
         success = self.scraper.perform_clock_in()
         if success:
-            send_notification("Keka Timer", "Clock In", "Clock In attempt finished. Refreshing...")
+            send_notification("Keka Timer", "Clock In", "Clock In successful! Refreshing...")
             self.do_refresh()
         else:
-            send_notification("Keka Timer", "Clock In Failed", "Could not find button or error occurred.")
+            send_notification("Keka Timer", "Clock In Failed", "Could not find button or error occurred. Check if you're logged in.")
             self.title = "Keka: Error"
 
     def clock_out(self, _):
@@ -74,12 +81,19 @@ class KekaTimerApp(rumps.App):
         threading.Thread(target=self.do_clock_out, daemon=True).start()
 
     def do_clock_out(self):
+        # Check if session is valid
+        if not self.scraper.is_session_valid():
+            logging.warning("Session invalid, prompting user to relaunch")
+            send_notification("Keka Timer", "Session Expired", "Browser session expired. Please restart the app.")
+            self.title = "Keka: Session Expired"
+            return
+        
         success = self.scraper.perform_clock_out()
         if success:
-            send_notification("Keka Timer", "Clock Out", "Clock Out attempt finished. Refreshing...")
+            send_notification("Keka Timer", "Clock Out", "Clock Out successful! Refreshing...")
             self.do_refresh()
         else:
-            send_notification("Keka Timer", "Clock Out Failed", "Could not find button or error occurred.")
+            send_notification("Keka Timer", "Clock Out Failed", "Could not find button or error occurred. Check if you're logged in.")
             self.title = "Keka: Error"
 
     def refresh_data(self, _):
@@ -88,16 +102,19 @@ class KekaTimerApp(rumps.App):
         threading.Thread(target=self.do_refresh, daemon=True).start()
 
     def do_refresh(self):
+        if not self.scraper.is_session_valid():
+            logging.warning("Session invalid during refresh")
+            send_notification("Keka Timer", "Session Expired", "Browser session expired. Please restart the app.")
+            self.clock_in_time = None
+            self.title = "Keka: Session Expired"
+            return
+        
         new_time = self.scraper.get_clock_in_time()
         if new_time:
             self.clock_in_time = new_time
             logging.info(f"Refresh success: {new_time}")
         else:
             logging.info("Refresh: Not clocked in or failed.")
-            # We don't clear clock_in_time if refresh fails, unless we want to reset.
-            # But if user logged out, maybe we should?
-            # For now, let's keep the old time if refresh fails, or set to None if we confirm logout.
-            # Scraper returns None if not found.
             self.clock_in_time = None
 
     def quit_app(self, _):

@@ -7,11 +7,47 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+import logging
+import re
+from datetime import datetime, timedelta
 
 class KekaScraper:
     def __init__(self, url="https://shipthis.keka.com"):
         self.url = url
         self.driver = None
+        self.session_valid = True  # Track if session is valid
+
+    def is_session_valid(self):
+        """Check if browser session is still valid."""
+        if not self.driver:
+            return False
+        try:
+            _ = self.driver.current_url
+            return True
+        except:
+            self.session_valid = False
+            return False
+
+    def relaunch_browser(self):
+        """Relaunch browser and wait for login."""
+        logging.info("Relaunching browser...")
+        try:
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+            self.launch_browser()
+            if self.wait_for_login():
+                self.session_valid = True
+                logging.info("Browser relaunched and logged in successfully")
+                return True
+            else:
+                logging.error("Failed to login after browser relaunch")
+                return False
+        except Exception as e:
+            logging.error(f"Error relaunching browser: {e}")
+            return False
 
     def launch_browser(self):
         """Launches the Chrome browser."""
@@ -32,7 +68,6 @@ class KekaScraper:
         Waits for the user to log in manually.
         Detects login by checking for 'dashboard' in the URL or presence of dashboard elements.
         """
-        import logging
         logging.info("Waiting for user to log in...")
         print("Waiting for user to log in...")
         
@@ -79,9 +114,6 @@ class KekaScraper:
         Scrapes the clock-in time from the logs page by parsing 'Since Last Login'.
         Returns a datetime object or None if not found/not clocked in.
         """
-        import logging
-        import re
-        from datetime import datetime, timedelta
         
         # Retry once if first attempt fails
         for attempt in range(2):
@@ -91,6 +123,13 @@ class KekaScraper:
                     time.sleep(2)
                 
                 logging.info("Scraping clock-in time from logs page...")
+                
+                # Check if driver is still valid
+                try:
+                    _ = self.driver.current_url
+                except Exception as e:
+                    logging.error(f"Driver session invalid: {e}")
+                    return None
                 
                 # Check session before scraping
                 if not self.ensure_session_alive():
@@ -150,9 +189,15 @@ class KekaScraper:
 
     def perform_clock_in(self):
         """Attempts to clock in from dashboard."""
-        import logging
         try:
             logging.info("Attempting to Clock In...")
+            
+
+            try:
+                _ = self.driver.current_url
+            except Exception as e:
+                logging.error(f"Driver session invalid, cannot clock in: {e}")
+                return False
             
             # Force page refresh to ensure fresh DOM
             logging.info("Refreshing page to ensure fresh session...")
@@ -198,9 +243,14 @@ class KekaScraper:
 
     def perform_clock_out(self):
         """Attempts to clock out with two-step confirmation."""
-        import logging
         try:
             logging.info("Attempting to Clock Out...")
+            
+            try:
+                _ = self.driver.current_url
+            except Exception as e:
+                logging.error(f"Driver session invalid, cannot clock out: {e}")
+                return False
             
             # Force page refresh to ensure fresh DOM
             logging.info("Refreshing page to ensure fresh session...")
@@ -266,7 +316,6 @@ class KekaScraper:
 
     def perform_logout(self):
         """Attempts to log out."""
-        import logging
         try:
             logging.info("Attempting to Log Out...")
             if not self.driver:
@@ -318,7 +367,6 @@ class KekaScraper:
 
     def minimize_window(self):
         """Minimizes the browser window."""
-        import logging
         if self.driver:
             try:
                 self.driver.minimize_window()
