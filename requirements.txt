@@ -1,7 +1,5 @@
-selenium
-webdriver_manager
+selenium>=4.6.0
 customtkinter
 pillow
-pyinstaller
 pyinstaller
 rumps
