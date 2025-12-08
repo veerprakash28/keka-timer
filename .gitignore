@@ -6,7 +6,7 @@ venv/
 .env
 
 # Distribution / Packaging
-# dist/
+dist/
 build/
 *.spec
 
