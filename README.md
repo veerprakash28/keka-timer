@@ -7,6 +7,8 @@ A native macOS Menu Bar application to track your Keka work hours. It automates 
 -   **Auto-Login**: Automates the login process (supports SSO).
 -   **Smart Detection**: Automatically detects when you are clocked in.
 -   **Clock In/Out**: Manage your attendance directly from the menu bar.
+-   **Auto-Shutdown & Clock Out**: Automatically clocks you out and closes the app if you work >1 hour overtime or snooze 3 times.
+-   **Session Keep-Alive**: Prevents session timeouts with automatic background refreshing.
 -   **Native Experience**: Built with `rumps` for a seamless macOS feel.
 
 ## Installation (For Users)

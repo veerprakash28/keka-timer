@@ -113,6 +113,28 @@ class KekaScraper:
             logging.error(f"Error checking session: {e}")
             return False
 
+    def refresh_session(self):
+        """Refresh session to prevent timeout by navigating to dashboard."""
+        try:
+            if not self.driver:
+                return False
+
+            logging.info("Refreshing session...")
+            # Navigate to dashboard to keep session alive
+            self.driver.get(f"{self.url}/#/home/dashboard")
+            time.sleep(1)
+
+            # Verify we're still logged in
+            if self.ensure_session_alive():
+                logging.info("Session refreshed successfully")
+                return True
+            else:
+                logging.warning("Session refresh failed - session expired")
+                return False
+        except Exception as e:
+            logging.error(f"Error refreshing session: {e}")
+            return False
+
     def get_clock_in_time(self):
         """
         Scrapes the clock-in time from the logs page by parsing 'Since Last Login'.
